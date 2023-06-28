@@ -29,7 +29,8 @@ const (
   "EXHAUST_PATH": "./exhaust",
   "ALLOWED_TYPES": ["jpg","png","jpeg","bmp"],
   "ENABLE_AVIF": false,
-  "ENABLE_EXTRA_PARAMS": false
+  "ENABLE_EXTRA_PARAMS": false,
+  "LAZY_MODE": false,
 }`
 
 	SampleSystemd = `
@@ -48,19 +49,24 @@ RestartSec=3s
 
 [Install]
 WantedBy=multi-user.target`
+
+	lazyTickerPeriod = 5
 )
 
 var (
-	configPath  string
-	Jobs        int
-	DumpSystemd bool
-	DumpConfig  bool
-	ShowVersion bool
-	ProxyMode   bool
-	Prefetch    bool
-	Config      jsonFile
-	Version     = "0.9.0"
-	WriteLock   = cache.New(5*time.Minute, 10*time.Minute)
+	configPath     string
+	Jobs           int
+	MaxDefaultJobs int
+	MaxHeavyJobs   int
+	LazyMode       bool
+	DumpSystemd    bool
+	DumpConfig     bool
+	ShowVersion    bool
+	ProxyMode      bool
+	Prefetch       bool
+	Config         jsonFile
+	Version        = "0.9.0"
+	WriteLock      = cache.New(5*time.Minute, 10*time.Minute)
 )
 
 type jsonFile struct {

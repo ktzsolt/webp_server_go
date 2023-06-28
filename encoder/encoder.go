@@ -13,12 +13,39 @@ import (
 
 	"github.com/davidbyttow/govips/v2/vips"
 	log "github.com/sirupsen/logrus"
+
+	pq "github.com/emirpasic/gods/queues/priorityqueue"
+	hs "github.com/emirpasic/gods/sets/hashset"
 )
 
 var (
-	boolFalse   vips.BoolParameter
-	intMinusOne vips.IntParameter
+	boolFalse        vips.BoolParameter
+	intMinusOne      vips.IntParameter
+	DefaultWorkQueue *pq.Queue // Queue of pending image convertions
+	HeavyWorkQueue   *pq.Queue // Queue of pending image heavy convertions (e.g. Avif)
+	WorkOngoingSet   *hs.Set   // Tracks the ongoing work to avoid queue duplicate convertions
 )
+
+var FormatPriority = map[string]int{
+	"webp": 10,
+	"avif": 1,
+}
+
+func getFormatPriority(format string) int {
+	if priority, found := FormatPriority[format]; found {
+		return priority
+	}
+	return 0
+}
+
+type Element struct {
+	itype       string
+	raw         string
+	optimized   string
+	quality     int
+	extraParams config.ExtraParams
+	priority    int
+}
 
 func init() {
 	vips.Startup(&vips.Config{
@@ -110,12 +137,49 @@ func convertImage(raw, optimized, imageType string, extraParams config.ExtraPara
 		log.Error(err.Error())
 	}
 
-	switch imageType {
-	case "webp":
-		err = webpEncoder(raw, optimized, extraParams)
-	case "avif":
-		err = avifEncoder(raw, optimized, extraParams)
+	if !config.LazyMode {
+		// Default mode: sync converts
+		switch imageType {
+		case "webp":
+			err = webpEncoder(raw, optimized, extraParams)
+		case "avif":
+			err = avifEncoder(raw, optimized, extraParams)
+		}
+	} else {
+		// Lazy mode: async converts
+		workElement := Element{
+			priority:    getFormatPriority(imageType),
+			itype:       imageType,
+			raw:         raw,
+			optimized:   optimized,
+			quality:     config.Config.Quality,
+			extraParams: extraParams,
+		}
+
+		var WorkQueue *pq.Queue
+		switch imageType {
+		case "webp":
+			WorkQueue = DefaultWorkQueue
+		case "avif":
+			WorkQueue = HeavyWorkQueue
+		default:
+			WorkQueue = DefaultWorkQueue
+		}
+
+		it := WorkQueue.Iterator()
+		for it.Next() {
+			if it.Value() == workElement {
+				log.Debugf("Skipping: already in the work queue: %v", workElement)
+				return nil
+			}
+		}
+		if WorkOngoingSet.Contains(workElement) {
+			log.Debugf("Skipping: another conversion already in progress: %v", workElement)
+			return nil
+		}
+		WorkQueue.Enqueue(workElement)
 	}
+
 	return err
 }
 
